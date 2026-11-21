@@ -1,0 +1,1833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chiptune Procedural Music Generator</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+  <style>
+    :root {
+      --accent: #00f5d4;
+      --accent-secondary: #ff2a85;
+      --bg-dark: #070811;
+      --panel-bg: rgba(12, 15, 28, 0.82);
+      --panel-border: rgba(255, 255, 255, 0.14);
+      --text-main: #f0f4ff;
+      --text-muted: #8e9bb8;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg-dark);
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, monospace;
+      color: var(--text-main);
+    }
+
+    #visualizer-canvas {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      display: block;
+      z-index: 1;
+    }
+
+    #ui-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 20px;
+      pointer-events: none;
+      transition: opacity 0.35s ease, transform 0.35s ease;
+    }
+
+    #ui-overlay.ui-hidden {
+      opacity: 0;
+      transform: translateY(10px);
+      pointer-events: none !important;
+    }
+
+    #ui-overlay.ui-hidden * {
+      pointer-events: none !important;
+    }
+
+    .hud-card {
+      background: var(--panel-bg);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid var(--panel-border);
+      border-radius: 14px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      pointer-events: auto;
+    }
+
+    /* Top Header & Track Info */
+    .top-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px 22px;
+      max-width: 1180px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    .track-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .eyebrow {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 11px;
+      letter-spacing: 2.2px;
+      text-transform: uppercase;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      box-shadow: 0 0 8px transparent;
+      transition: background 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .status-dot.active {
+      background: var(--accent);
+      box-shadow: 0 0 10px var(--accent);
+    }
+
+    .track-title {
+      font-size: 21px;
+      font-weight: 700;
+      letter-spacing: 0.4px;
+      color: #ffffff;
+    }
+
+    .track-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 2px;
+    }
+
+    .tag {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 12px;
+      padding: 3px 9px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--text-muted);
+    }
+
+    .tag strong {
+      color: var(--text-main);
+    }
+
+    /* Timeline & Progress */
+    .timeline-box {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+      min-width: 240px;
+      flex: 1;
+      max-width: 360px;
+    }
+
+    .time-readout {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .progress-track {
+      width: 100%;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 999px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-secondary));
+      border-radius: 999px;
+      transition: width 0.15s linear;
+    }
+
+    .ramp-marker {
+      position: absolute;
+      right: 4.16%;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: rgba(255, 255, 255, 0.45);
+    }
+
+    /* Bottom Controls Dock */
+    .controls-dock {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      padding: 16px 22px;
+      max-width: 1180px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    .controls-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    .mixer-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .btn-group {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 9px;
+    }
+
+    button {
+      appearance: none;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-main);
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 9px 14px;
+      border-radius: 10px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      transition: all 0.2s ease;
+    }
+
+    button:hover {
+      background: rgba(255, 255, 255, 0.13);
+      border-color: rgba(255, 255, 255, 0.3);
+      transform: translateY(-1px);
+    }
+
+    button:active {
+      transform: translateY(0);
+    }
+
+    button.primary {
+      background: var(--accent);
+      color: #05070e;
+      border-color: var(--accent);
+      box-shadow: 0 0 20px rgba(0, 245, 212, 0.3);
+    }
+
+    button.primary:hover {
+      filter: brightness(1.08);
+      background: var(--accent);
+    }
+
+    button.toggle-active {
+      background: rgba(255, 190, 11, 0.18);
+      border-color: #ffbe0b;
+      color: #ffd166;
+    }
+
+    .btn-subtle {
+      padding: 7px 11px;
+      font-size: 12px;
+      color: var(--text-muted);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .btn-subtle:hover {
+      color: var(--text-main);
+    }
+
+    .kbd-hint {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 10.5px;
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: var(--text-muted);
+    }
+
+    /* Synth Preset Selector */
+    .preset-control {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+
+    .preset-control label {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    select {
+      appearance: none;
+      -webkit-appearance: none;
+      background-color: rgba(18, 22, 40, 0.92);
+      color: var(--text-main);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 10px;
+      padding: 8px 32px 8px 12px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      outline: none;
+      transition: border-color 0.2s ease, background-color 0.2s ease;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2300f5d4' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+    }
+
+    select:hover, select:focus {
+      border-color: var(--accent);
+      background-color: rgba(25, 31, 56, 0.98);
+    }
+
+    /* Mood / Tempo Slider */
+    .slider-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      min-width: 210px;
+      flex: 1;
+      max-width: 290px;
+    }
+
+    .slider-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .slider-header strong {
+      color: var(--accent);
+      font-family: 'Courier New', Courier, monospace;
+    }
+
+    /* EQ Channel Volume & Master Mixer Grid */
+    .eq-mixer-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(115px, 1fr)) auto minmax(135px, 1.15fr) auto;
+      align-items: center;
+      gap: 14px;
+      width: 100%;
+    }
+
+    .eq-channel {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 8px 11px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      transition: border-color 0.2s ease, opacity 0.2s ease;
+    }
+
+    .eq-channel:hover {
+      border-color: rgba(255, 255, 255, 0.22);
+    }
+
+    .eq-channel.is-zero {
+      opacity: 0.62;
+    }
+
+    .eq-channel.master-channel {
+      background: rgba(0, 245, 212, 0.06);
+      border-color: rgba(0, 245, 212, 0.26);
+    }
+
+    .eq-channel-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 11.5px;
+    }
+
+    .eq-ch-name {
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      color: var(--text-main);
+    }
+
+    .master-channel .eq-ch-name {
+      color: var(--accent);
+    }
+
+    .eq-ch-val {
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+
+    .master-channel .eq-ch-val {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .mixer-divider {
+      width: 1px;
+      height: 36px;
+      background: rgba(255, 255, 255, 0.14);
+    }
+
+    /* Range Slider Styling */
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.14);
+      outline: none;
+      cursor: pointer;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 2px solid #070811;
+      box-shadow: 0 0 9px var(--accent);
+      cursor: pointer;
+      transition: transform 0.15s ease;
+    }
+
+    input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.16);
+    }
+
+    input[type="range"]::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 2px solid #070811;
+      box-shadow: 0 0 9px var(--accent);
+      cursor: pointer;
+    }
+
+    .master-channel input[type="range"]::-webkit-slider-thumb {
+      background: var(--accent-secondary);
+      box-shadow: 0 0 10px var(--accent-secondary);
+    }
+
+    .master-channel input[type="range"]::-moz-range-thumb {
+      background: var(--accent-secondary);
+      box-shadow: 0 0 10px var(--accent-secondary);
+    }
+
+    @media (max-width: 920px) {
+      .eq-mixer-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .mixer-divider {
+        display: none;
+      }
+      .master-channel {
+        grid-column: span 2;
+      }
+    }
+
+    @media (max-width: 680px) {
+      #ui-overlay {
+        padding: 12px;
+      }
+      .top-bar, .controls-dock {
+        padding: 12px 14px;
+      }
+      .timeline-box, .slider-group {
+        max-width: 100%;
+        min-width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="visualizer-canvas"></canvas>
+
+  <div id="ui-overlay">
+    <!-- Top Information HUD -->
+    <header class="hud-card top-bar">
+      <div class="track-meta">
+        <div class="eyebrow">
+          <span id="status-dot" class="status-dot"></span>
+          <span id="status-label">READY // STANDBY</span>
+        </div>
+        <div id="track-title" class="track-title">Track 01 — Crystal Horizons</div>
+        <div class="track-tags">
+          <span class="tag">Scale: <strong id="meta-scale">D Dorian</strong></span>
+          <span class="tag">Tempo: <strong id="meta-bpm">122 BPM</strong></span>
+          <span class="tag">Section: <strong id="meta-section">INTRO</strong></span>
+          <span class="tag">Wave: <strong id="meta-wave">Auto (Pulse 25%)</strong></span>
+          <span class="tag">Master Limiter: <strong>-1.5 dB</strong></span>
+        </div>
+      </div>
+
+      <div class="timeline-box">
+        <div class="time-readout">
+          <span id="time-elapsed">00:00</span>
+          <span id="cycle-mode-label">AUTO-NEXT AT 02:00</span>
+          <span>02:00</span>
+        </div>
+        <div class="progress-track">
+          <div id="progress-fill" class="progress-fill"></div>
+          <div class="ramp-marker" title="5-second fade-out ramp"></div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Bottom Controls Dock -->
+    <footer class="hud-card controls-dock">
+      <!-- Row 1: Primary Transport, Synth Preset & Mood/Tempo -->
+      <div class="controls-row">
+        <div class="btn-group">
+          <button id="btn-play-pause" class="primary" title="Play or Pause audio">
+            <span id="play-icon">▶</span>
+            <span id="play-text">Play</span>
+          </button>
+
+          <button id="btn-next" title="Fade out and compose a new track">
+            <span>⏭</span>
+            <span>Next Track</span>
+          </button>
+
+          <button id="btn-pause-next" title="Keep playing the current track continuously">
+            <span id="lock-icon">🔓</span>
+            <span id="lock-text">Pause Next Song: Off</span>
+          </button>
+
+          <button id="btn-hide-ui" title="Press H key to hide or restore UI">
+            <span>Hide UI</span>
+            <span class="kbd-hint">H</span>
+          </button>
+        </div>
+
+        <div class="preset-control">
+          <label for="synth-preset">Synth Wave</label>
+          <select id="synth-preset" title="Select synthesizer waveform preset">
+            <option value="auto">Auto (Track Adaptive)</option>
+            <option value="nes">NES 2A03 (25% Pulse / Tri)</option>
+            <option value="gameboy">GameBoy DMG (12.5% Pulse)</option>
+            <option value="sid">C64 SID (Fat Saw / Pulse)</option>
+            <option value="velvet">Velvet Chip (Triangle / Sine)</option>
+            <option value="square">Pure Square Arcade</option>
+          </select>
+        </div>
+
+        <div class="slider-group">
+          <div class="slider-header">
+            <span>Mood / Tempo</span>
+            <strong id="mood-readout">Balanced · 122 BPM</strong>
+          </div>
+          <input id="mood-slider" type="range" min="0" max="100" value="50" />
+        </div>
+      </div>
+
+      <!-- Row 2: Per-Instrument EQ Volume Sliders & Master Volume Control -->
+      <div class="mixer-row">
+        <div class="eq-mixer-grid">
+          <div class="eq-channel" id="box-lead">
+            <div class="eq-channel-top">
+              <span class="eq-ch-name">Lead EQ</span>
+              <span class="eq-ch-val" id="val-lead">0.0 dB</span>
+            </div>
+            <input id="vol-lead" type="range" min="0" max="125" value="100" title="Lead melody channel volume" />
+          </div>
+
+          <div class="eq-channel" id="box-arp">
+            <div class="eq-channel-top">
+              <span class="eq-ch-name">Arp EQ</span>
+              <span class="eq-ch-val" id="val-arp">0.0 dB</span>
+            </div>
+            <input id="vol-arp" type="range" min="0" max="125" value="100" title="Harmony arpeggiator channel volume" />
+          </div>
+
+          <div class="eq-channel" id="box-bass">
+            <div class="eq-channel-top">
+              <span class="eq-ch-name">Bass EQ</span>
+              <span class="eq-ch-val" id="val-bass">0.0 dB</span>
+            </div>
+            <input id="vol-bass" type="range" min="0" max="125" value="100" title="Bassline channel volume" />
+          </div>
+
+          <div class="eq-channel" id="box-drums">
+            <div class="eq-channel-top">
+              <span class="eq-ch-name">Drums EQ</span>
+              <span class="eq-ch-val" id="val-drums">0.0 dB</span>
+            </div>
+            <input id="vol-drums" type="range" min="0" max="125" value="100" title="Percussion channel volume" />
+          </div>
+
+          <div class="mixer-divider"></div>
+
+          <div class="eq-channel master-channel" id="box-master">
+            <div class="eq-channel-top">
+              <span class="eq-ch-name">Master Vol</span>
+              <span class="eq-ch-val" id="val-master">85%</span>
+            </div>
+            <input id="vol-master" type="range" min="0" max="100" value="85" title="Master output volume for all instruments" />
+          </div>
+
+          <button id="btn-reset-mix" class="btn-subtle" title="Reset all channel EQ levels and Master volume">
+            Reset Mix
+          </button>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    (() => {
+      // =========================================================================
+      // 1. CONSTANTS, SYNTH WAVEFORM PRESETS & MUSICAL VOCABULARY
+      // =========================================================================
+      const TRACK_DURATION_SEC = 120; // 2 minutes per composition
+      const FADE_OUT_DURATION_SEC = 5; // Ramp down over final 5 seconds
+      const DEFAULT_CHANNEL_PCT = 100;
+      const DEFAULT_MASTER_PCT = 85;
+
+      const SYNTH_PRESETS = {
+        auto: {
+          label: "Auto (Track)",
+          lead: null,
+          arp: { type: "pulse", width: 0.5 },
+          bass: { type: "triangle" },
+          bassCutoff: 2400,
+          leadVol: -9.5,
+          arpVol: -14.5,
+          bassVol: -6.5
+        },
+        nes: {
+          label: "NES 2A03",
+          lead: { type: "pulse", width: 0.25 },
+          arp: { type: "pulse", width: 0.5 },
+          bass: { type: "triangle" },
+          bassCutoff: 2400,
+          leadVol: -9.5,
+          arpVol: -14.5,
+          bassVol: -6.2
+        },
+        gameboy: {
+          label: "GameBoy DMG",
+          lead: { type: "pulse", width: 0.125 },
+          arp: { type: "pulse", width: 0.25 },
+          bass: { type: "square" },
+          bassCutoff: 950,
+          leadVol: -9.0,
+          arpVol: -14.5,
+          bassVol: -9.5
+        },
+        sid: {
+          label: "C64 SID",
+          lead: { type: "fatsawtooth" },
+          arp: { type: "triangle" },
+          bass: { type: "sawtooth" },
+          bassCutoff: 1100,
+          leadVol: -11.5,
+          arpVol: -12.5,
+          bassVol: -8.5
+        },
+        velvet: {
+          label: "Velvet Chip",
+          lead: { type: "triangle" },
+          arp: { type: "sine" },
+          bass: { type: "triangle" },
+          bassCutoff: 1800,
+          leadVol: -7.5,
+          arpVol: -12.0,
+          bassVol: -6.0
+        },
+        square: {
+          label: "Pure Square",
+          lead: { type: "square" },
+          arp: { type: "pulse", width: 0.35 },
+          bass: { type: "triangle" },
+          bassCutoff: 2200,
+          leadVol: -10.5,
+          arpVol: -14.5,
+          bassVol: -6.5
+        }
+      };
+
+      const ROOTS = ["C", "D", "Eb", "E", "F", "G", "Ab", "A", "Bb"];
+
+      const SCALES = [
+        {
+          name: "Ionian (Major)",
+          intervals: [0, 2, 4, 5, 7, 9, 11],
+          moodBias: [0.35, 0.85],
+          progressions: [
+            [0, 4, 5, 3],
+            [0, 3, 4, 0],
+            [0, 5, 3, 4],
+            [0, 2, 3, 4]
+          ]
+        },
+        {
+          name: "Dorian",
+          intervals: [0, 2, 3, 5, 7, 9, 10],
+          moodBias: [0.2, 0.8],
+          progressions: [
+            [0, 3, 6, 0],
+            [0, 6, 3, 4],
+            [0, 2, 3, 4],
+            [0, 3, 0, 6]
+          ]
+        },
+        {
+          name: "Aeolian (Minor)",
+          intervals: [0, 2, 3, 5, 7, 8, 10],
+          moodBias: [0.25, 1.0],
+          progressions: [
+            [0, 5, 2, 6],
+            [0, 3, 4, 0],
+            [0, 6, 5, 4],
+            [0, 3, 6, 2]
+          ]
+        },
+        {
+          name: "Mixolydian",
+          intervals: [0, 2, 4, 5, 7, 9, 10],
+          moodBias: [0.45, 1.0],
+          progressions: [
+            [0, 6, 3, 0],
+            [0, 6, 3, 4],
+            [0, 4, 6, 3],
+            [0, 3, 6, 4]
+          ]
+        },
+        {
+          name: "Lydian",
+          intervals: [0, 2, 4, 6, 7, 9, 11],
+          moodBias: [0.0, 0.55],
+          progressions: [
+            [0, 1, 0, 4],
+            [0, 1, 6, 0],
+            [0, 4, 1, 0],
+            [0, 2, 1, 4]
+          ]
+        }
+      ];
+
+      const TITLE_ADJECTIVES = [
+        "Starlight", "Cobalt", "Emerald", "Crystal", "Solar", "Midnight",
+        "Pixel", "Aether", "Velvet", "Neon", "Chrono", "Astral", "Jade",
+        "Crimson", "Silver", "Mirage", "Cloud", "Sunken", "Glacier", "Amber"
+      ];
+
+      const TITLE_NOUNS = [
+        "Citadel", "Horizon", "Cavern", "Circuit", "Overdrive", "Sanctuary",
+        "Harbor", "Spire", "Odyssey", "Labyrinth", "Meadow", "Observatory",
+        "Fortress", "Canopy", "Voyage", "Keep", "Promenade", "Outpost"
+      ];
+
+      const PALETTES = [
+        { primary: "#00f5d4", secondary: "#ff2a85", bg: "#070913" },
+        { primary: "#ffd166", secondary: "#06d6a0", bg: "#080c12" },
+        { primary: "#38bdf8", secondary: "#a855f7", bg: "#070814" },
+        { primary: "#fb7185", secondary: "#34d399", bg: "#0c0711" },
+        { primary: "#a3e635", secondary: "#22d3ee", bg: "#060d0b" },
+        { primary: "#f472b6", secondary: "#60a5fa", bg: "#0a0714" }
+      ];
+
+      // =========================================================================
+      // 2. APPLICATION STATE
+      // =========================================================================
+      let audioInitialized = false;
+      let isPlaying = false;
+      let pauseNextSong = false;
+      let isRampingDown = false;
+      let trackCount = 0;
+      let trackElapsedSec = 0;
+      let lastFrameTime = performance.now();
+      let moodValue = 50;
+      let selectedPresetKey = "auto";
+      let currentComposition = null;
+      let stepCounter = 0;
+
+      // Mixer levels in percentage (0..125 for instruments, 0..100 for master)
+      const channelLevels = {
+        lead: DEFAULT_CHANNEL_PCT,
+        arp: DEFAULT_CHANNEL_PCT,
+        bass: DEFAULT_CHANNEL_PCT,
+        drums: DEFAULT_CHANNEL_PCT
+      };
+      let masterLevelPct = DEFAULT_MASTER_PCT;
+
+      // Audio nodes
+      let fadeBus, masterVolumeBus, masterFilter, masterCompressor, masterLimiter;
+      let channelGains = {};
+      let fftAnalyser, waveAnalyser;
+      let leadSynth, leadVibrato, leadDelay;
+      let arpSynth, arpFilter;
+      let bassSynth, bassFilter;
+      let kickSynth, snareSynth, hatSynth;
+
+      // =========================================================================
+      // 3. PROCEDURAL CHIPTUNE COMPOSER
+      // =========================================================================
+      function randInt(min, max) {
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+      }
+
+      function pick(arr) {
+        return arr[Math.floor(Math.random() * arr.length)];
+      }
+
+      function getScaleNote(rootName, intervals, octave, scaleDegree) {
+        const rootMidi = Tone.Frequency(`${rootName}${octave}`).toMidi();
+        const len = intervals.length;
+        const wrappedDeg = ((scaleDegree % len) + len) % len;
+        const octaveShift = Math.floor(scaleDegree / len);
+        const midi = rootMidi + intervals[wrappedDeg] + octaveShift * 12;
+        return Tone.Frequency(midi, "midi").toNote();
+      }
+
+      function generateMelodyMotif(chordProgression, energyLevel = 1) {
+        const totalSteps = 64;
+        const steps = new Array(totalSteps).fill(null);
+        const baseMotif = new Array(32).fill(null);
+        let currentDeg = pick([0, 2, 4]);
+
+        for (let s = 0; s < 32; s++) {
+          const barInPair = Math.floor(s / 16);
+          const stepInBar = s % 16;
+          const chordRoot = chordProgression[barInPair % chordProgression.length];
+          const chordTones = [chordRoot, chordRoot + 2, chordRoot + 4, chordRoot + 7];
+
+          const isDownbeat = stepInBar === 0;
+          const isQuarterBeat = stepInBar % 4 === 0;
+          const isEighthBeat = stepInBar % 2 === 0;
+
+          if (barInPair === 1 && stepInBar >= 28 && Math.random() < 0.75) {
+            continue;
+          }
+
+          let playProb = 0;
+          if (isDownbeat) playProb = 0.92;
+          else if (isQuarterBeat) playProb = 0.68;
+          else if (isEighthBeat) playProb = 0.38 + energyLevel * 0.14;
+          else playProb = 0.12 + energyLevel * 0.1;
+
+          if (Math.random() < playProb) {
+            if (isDownbeat || (isQuarterBeat && Math.random() < 0.65)) {
+              let bestTone = chordTones[0];
+              let minDist = 99;
+              for (const ct of chordTones) {
+                for (const octOff of [-7, 0, 7]) {
+                  const candidate = ct + octOff;
+                  const dist = Math.abs(candidate - currentDeg);
+                  if (dist < minDist) {
+                    minDist = dist;
+                    bestTone = candidate;
+                  }
+                }
+              }
+              currentDeg = bestTone;
+            } else {
+              const delta = pick([-2, -1, -1, 1, 1, 2]);
+              currentDeg = Math.max(-2, Math.min(11, currentDeg + delta));
+            }
+
+            const duration = isDownbeat ? pick(["8n", "8n.", "4n"]) : (isEighthBeat ? pick(["16n", "8n"]) : "16n");
+            baseMotif[s] = { deg: currentDeg, dur: duration };
+          }
+        }
+
+        for (let s = 0; s < 32; s++) {
+          steps[s] = baseMotif[s];
+
+          const barInPair = Math.floor(s / 16);
+          const stepInBar = s % 16;
+          const targetBar = barInPair + 2;
+          const chordRoot = chordProgression[targetBar % chordProgression.length];
+
+          if (baseMotif[s]) {
+            if (targetBar === 3 && stepInBar >= 24) {
+              if (stepInBar === 24) {
+                steps[s + 32] = { deg: chordRoot + 2, dur: "8n" };
+              } else if (stepInBar === 28) {
+                steps[s + 32] = { deg: chordRoot, dur: "4n" };
+              }
+            } else {
+              const shift = pick([-1, 0, 0, 1]);
+              steps[s + 32] = {
+                deg: baseMotif[s].deg + shift,
+                dur: baseMotif[s].dur
+              };
+            }
+          }
+        }
+
+        return steps;
+      }
+
+      function createNewComposition(prevComp = null) {
+        trackCount++;
+        const moodNorm = moodValue / 100;
+
+        let root = pick(ROOTS);
+        if (prevComp && root === prevComp.root) {
+          root = pick(ROOTS.filter(r => r !== prevComp.root));
+        }
+
+        const suitableScales = SCALES.filter(
+          s => moodNorm >= s.moodBias[0] - 0.15 && moodNorm <= s.moodBias[1] + 0.15
+        );
+        let scaleObj = pick(suitableScales.length ? suitableScales : SCALES);
+        if (prevComp && scaleObj.name === prevComp.scaleName && suitableScales.length > 1) {
+          scaleObj = pick(suitableScales.filter(s => s.name !== prevComp.scaleName));
+        }
+
+        const mainProg = pick(scaleObj.progressions);
+        let bridgeProg = pick(scaleObj.progressions);
+        if (bridgeProg === mainProg && scaleObj.progressions.length > 1) {
+          bridgeProg = pick(scaleObj.progressions.filter(p => p !== mainProg));
+        }
+
+        const baseBpm = Math.round(96 + moodNorm * 46 + randInt(-6, 6));
+        const leadPulseWidth = pick([0.125, 0.25, 0.35]);
+        const arpStyle = pick(["up16", "upDown16", "offbeat8", "brokenTriad"]);
+        const bassStyle = pick(["octaveBounce", "driving8", "syncopated", "classicRootFifth"]);
+        const drumStyle = pick(["platformer", "fourOnFloor", "syncopated", "halftime"]);
+
+        let palette = pick(PALETTES);
+        if (prevComp && palette.primary === prevComp.palette.primary) {
+          palette = pick(PALETTES.filter(p => p.primary !== prevComp.palette.primary));
+        }
+
+        const verseMelody = generateMelodyMotif(mainProg, 0.6);
+        const chorusMelody = generateMelodyMotif(mainProg, 1.0);
+        const bridgeMelody = generateMelodyMotif(bridgeProg, 0.4);
+
+        const title = `Track ${String(trackCount).padStart(2, "0")} — ${pick(TITLE_ADJECTIVES)} ${pick(TITLE_NOUNS)}`;
+
+        return {
+          title,
+          root,
+          scaleName: scaleObj.name,
+          intervals: scaleObj.intervals,
+          mainProg,
+          bridgeProg,
+          baseBpm,
+          leadPulseWidth,
+          arpStyle,
+          bassStyle,
+          drumStyle,
+          palette,
+          verseMelody,
+          chorusMelody,
+          bridgeMelody
+        };
+      }
+
+      // =========================================================================
+      // 4. WEB AUDIO & TONE.JS MASTER CHAIN + SYNTH ENGINE
+      // =========================================================================
+      function pctToLinearGain(pct) {
+        if (pct <= 0) return 0;
+        // Smooth perceptual curve with 100% = 1.0 unity gain
+        return Math.pow(pct / 100, 1.5);
+      }
+
+      function formatChannelDb(pct) {
+        if (pct <= 0) return "MUTE";
+        const gain = pctToLinearGain(pct);
+        const db = 20 * Math.log10(gain);
+        const sign = db > 0.05 ? "+" : "";
+        return `${sign}${db.toFixed(1)} dB`;
+      }
+
+      function initAudioEngine() {
+        if (audioInitialized) return;
+
+        // Master Chain:
+        // ChannelGains -> FadeBus (2-min envelope) -> MasterVolumeBus (User Master)
+        // -> Gentle Lowpass -> Compressor -> Limiter -> Destination
+        masterLimiter = new Tone.Limiter(-1.5).toDestination();
+        masterCompressor = new Tone.Compressor({
+          threshold: -16,
+          ratio: 4,
+          attack: 0.012,
+          release: 0.18
+        }).connect(masterLimiter);
+
+        masterFilter = new Tone.Filter({
+          frequency: 12000,
+          type: "lowpass",
+          rolloff: -12
+        }).connect(masterCompressor);
+
+        masterVolumeBus = new Tone.Gain(pctToLinearGain(masterLevelPct)).connect(masterFilter);
+        fadeBus = new Tone.Gain(1.0).connect(masterVolumeBus);
+
+        // Per-Channel EQ / Volume Gain Stages
+        channelGains.lead = new Tone.Gain(pctToLinearGain(channelLevels.lead)).connect(fadeBus);
+        channelGains.arp = new Tone.Gain(pctToLinearGain(channelLevels.arp)).connect(fadeBus);
+        channelGains.bass = new Tone.Gain(pctToLinearGain(channelLevels.bass)).connect(fadeBus);
+        channelGains.drums = new Tone.Gain(pctToLinearGain(channelLevels.drums)).connect(fadeBus);
+
+        // Visual Analysers tapped from post-limiter master output
+        fftAnalyser = new Tone.Analyser("fft", 128);
+        waveAnalyser = new Tone.Analyser("waveform", 128);
+        masterLimiter.connect(fftAnalyser);
+        masterLimiter.connect(waveAnalyser);
+
+        // Channel 1: Lead Synth
+        leadDelay = new Tone.FeedbackDelay({
+          delayTime: "8n.",
+          feedback: 0.16,
+          wet: 0.14
+        }).connect(channelGains.lead);
+
+        leadVibrato = new Tone.Vibrato({
+          frequency: 5.2,
+          depth: 0.07
+        }).connect(leadDelay);
+
+        leadSynth = new Tone.PolySynth(Tone.Synth, {
+          maxPolyphony: 3,
+          oscillator: {
+            type: "pulse",
+            width: 0.25
+          },
+          envelope: {
+            attack: 0.012,
+            decay: 0.18,
+            sustain: 0.45,
+            release: 0.22
+          }
+        }).connect(leadVibrato);
+        leadSynth.volume.value = -9.5;
+
+        // Channel 2: Harmony / Arpeggiator
+        arpFilter = new Tone.Filter({
+          frequency: 4200,
+          type: "lowpass"
+        }).connect(channelGains.arp);
+
+        arpSynth = new Tone.PolySynth(Tone.Synth, {
+          maxPolyphony: 4,
+          oscillator: {
+            type: "pulse",
+            width: 0.5
+          },
+          envelope: {
+            attack: 0.006,
+            decay: 0.11,
+            sustain: 0.12,
+            release: 0.1
+          }
+        }).connect(arpFilter);
+        arpSynth.volume.value = -14.5;
+
+        // Channel 3: Bass Synth with Warm Low-Pass Filter
+        bassFilter = new Tone.Filter({
+          frequency: 2400,
+          type: "lowpass",
+          rolloff: -12
+        }).connect(channelGains.bass);
+
+        bassSynth = new Tone.Synth({
+          oscillator: {
+            type: "triangle"
+          },
+          envelope: {
+            attack: 0.008,
+            decay: 0.16,
+            sustain: 0.72,
+            release: 0.12
+          }
+        }).connect(bassFilter);
+        bassSynth.volume.value = -6.5;
+
+        // Channel 4: Chiptune Percussion
+        kickSynth = new Tone.MembraneSynth({
+          pitchDecay: 0.035,
+          octaves: 3.2,
+          oscillator: { type: "triangle" },
+          envelope: {
+            attack: 0.003,
+            decay: 0.14,
+            sustain: 0,
+            release: 0.05
+          }
+        }).connect(channelGains.drums);
+        kickSynth.volume.value = -6;
+
+        const snareFilter = new Tone.Filter(1800, "bandpass").connect(channelGains.drums);
+        snareSynth = new Tone.NoiseSynth({
+          noise: { type: "white" },
+          envelope: {
+            attack: 0.002,
+            decay: 0.12,
+            sustain: 0,
+            release: 0.04
+          }
+        }).connect(snareFilter);
+        snareSynth.volume.value = -12.5;
+
+        const hatFilter = new Tone.Filter(6500, "highpass").connect(channelGains.drums);
+        hatSynth = new Tone.NoiseSynth({
+          noise: { type: "white" },
+          envelope: {
+            attack: 0.001,
+            decay: 0.038,
+            sustain: 0,
+            release: 0.02
+          }
+        }).connect(hatFilter);
+        hatSynth.volume.value = -18.5;
+
+        // Master 16th-Note Sequencer Loop
+        Tone.Transport.scheduleRepeat(onSixteenthStep, "16n");
+        audioInitialized = true;
+      }
+
+      function setChannelLevel(channelKey, pct) {
+        channelLevels[channelKey] = pct;
+
+        const valEl = document.getElementById(`val-${channelKey}`);
+        const boxEl = document.getElementById(`box-${channelKey}`);
+        if (valEl) valEl.textContent = formatChannelDb(pct);
+        if (boxEl) boxEl.classList.toggle("is-zero", pct <= 0);
+
+        if (audioInitialized && channelGains[channelKey]) {
+          const targetGain = pctToLinearGain(pct);
+          channelGains[channelKey].gain.cancelScheduledValues(Tone.now());
+          channelGains[channelKey].gain.rampTo(targetGain, 0.04);
+        }
+      }
+
+      function setMasterLevel(pct) {
+        masterLevelPct = pct;
+
+        const valEl = document.getElementById("val-master");
+        const boxEl = document.getElementById("box-master");
+        if (valEl) valEl.textContent = pct <= 0 ? "MUTE" : `${pct}%`;
+        if (boxEl) boxEl.classList.toggle("is-zero", pct <= 0);
+
+        if (audioInitialized && masterVolumeBus) {
+          const targetGain = pctToLinearGain(pct);
+          masterVolumeBus.gain.cancelScheduledValues(Tone.now());
+          masterVolumeBus.gain.rampTo(targetGain, 0.04);
+        }
+      }
+
+      function resetMixerLevels() {
+        for (const key of Object.keys(channelLevels)) {
+          const slider = document.getElementById(`vol-${key}`);
+          if (slider) slider.value = DEFAULT_CHANNEL_PCT;
+          setChannelLevel(key, DEFAULT_CHANNEL_PCT);
+        }
+        const masterSlider = document.getElementById("vol-master");
+        if (masterSlider) masterSlider.value = DEFAULT_MASTER_PCT;
+        setMasterLevel(DEFAULT_MASTER_PCT);
+      }
+
+      function buildOscillatorConfig(oscSpec) {
+        if (oscSpec.type === "pulse") {
+          return { type: "pulse", width: oscSpec.width ?? 0.25 };
+        }
+        return { type: oscSpec.type };
+      }
+
+      function applySynthPresetAndTimbre() {
+        const preset = SYNTH_PRESETS[selectedPresetKey] || SYNTH_PRESETS.auto;
+        const leadSpec = preset.lead || {
+          type: "pulse",
+          width: currentComposition ? currentComposition.leadPulseWidth : 0.25
+        };
+
+        const waveTagEl = document.getElementById("meta-wave");
+        if (waveTagEl) {
+          if (selectedPresetKey === "auto") {
+            const pct = Math.round((leadSpec.width || 0.25) * 100);
+            waveTagEl.textContent = `Auto (Pulse ${pct}%)`;
+          } else {
+            waveTagEl.textContent = preset.label;
+          }
+        }
+
+        if (!audioInitialized) return;
+
+        leadSynth.releaseAll();
+        arpSynth.releaseAll();
+
+        leadSynth.set({ oscillator: buildOscillatorConfig(leadSpec) });
+        arpSynth.set({ oscillator: buildOscillatorConfig(preset.arp) });
+        bassSynth.set({ oscillator: buildOscillatorConfig(preset.bass) });
+
+        leadSynth.volume.rampTo(preset.leadVol, 0.08);
+        arpSynth.volume.rampTo(preset.arpVol, 0.08);
+        bassSynth.volume.rampTo(preset.bassVol, 0.08);
+        bassFilter.frequency.rampTo(preset.bassCutoff, 0.12);
+
+        applyMoodAndTempo(false);
+      }
+
+      function applyMoodAndTempo(smooth = true) {
+        if (!currentComposition) return;
+        const moodNorm = moodValue / 100;
+
+        const multiplier = 0.78 + moodNorm * 0.48;
+        const effectiveBpm = Math.round(
+          Math.max(76, Math.min(168, currentComposition.baseBpm * multiplier))
+        );
+
+        let moodLabel = "Balanced";
+        if (moodValue < 25) moodLabel = "Chill";
+        else if (moodValue < 45) moodLabel = "Dreamy";
+        else if (moodValue < 65) moodLabel = "Balanced";
+        else if (moodValue < 85) moodLabel = "Upbeat";
+        else moodLabel = "Overdrive";
+
+        document.getElementById("mood-readout").textContent = `${moodLabel} · ${effectiveBpm} BPM`;
+        document.getElementById("meta-bpm").textContent = `${effectiveBpm} BPM`;
+
+        if (audioInitialized) {
+          if (smooth) {
+            Tone.Transport.bpm.rampTo(effectiveBpm, 0.25);
+          } else {
+            Tone.Transport.bpm.value = effectiveBpm;
+          }
+
+          const filterFreq = 4500 + moodNorm * 9500;
+          const arpCutoff = 2200 + moodNorm * 3600;
+          masterFilter.frequency.rampTo(filterFreq, 0.25);
+          arpFilter.frequency.rampTo(arpCutoff, 0.25);
+          leadDelay.wet.rampTo(0.22 - moodNorm * 0.12, 0.25);
+        }
+      }
+
+      // =========================================================================
+      // 5. DETERMINISTIC 16TH-NOTE SEQUENCER
+      // =========================================================================
+      function onSixteenthStep(time) {
+        if (!currentComposition) return;
+
+        const comp = currentComposition;
+        const stepInBar = stepCounter % 16;
+        const totalBars = Math.floor(stepCounter / 16);
+        const cycleBar = totalBars % 18;
+
+        let sectionName = "VERSE A";
+        let sectionBar = 0;
+        let progression = comp.mainProg;
+
+        if (cycleBar < 2) {
+          sectionName = "INTRO";
+          sectionBar = cycleBar;
+        } else if (cycleBar < 6) {
+          sectionName = "VERSE A";
+          sectionBar = cycleBar - 2;
+        } else if (cycleBar < 10) {
+          sectionName = "CHORUS B";
+          sectionBar = cycleBar - 6;
+        } else if (cycleBar < 14) {
+          sectionName = "BRIDGE C";
+          sectionBar = cycleBar - 10;
+          progression = comp.bridgeProg;
+        } else {
+          sectionName = "CHORUS B'";
+          sectionBar = cycleBar - 14;
+        }
+
+        if (stepInBar === 0) {
+          Tone.Draw.schedule(() => {
+            const secEl = document.getElementById("meta-section");
+            if (secEl) secEl.textContent = sectionName;
+          }, time);
+        }
+
+        const chordRoot = progression[sectionBar % progression.length];
+        const chordDegrees = [chordRoot, chordRoot + 2, chordRoot + 4, chordRoot + 7];
+
+        // --- A. LEAD MELODY ---
+        if (sectionName !== "INTRO") {
+          const motifStep = sectionBar * 16 + stepInBar;
+          let activeMotif = comp.verseMelody;
+          let octave = 5;
+
+          if (sectionName === "CHORUS B" || sectionName === "CHORUS B'") {
+            activeMotif = comp.chorusMelody;
+          } else if (sectionName === "BRIDGE C") {
+            activeMotif = comp.bridgeMelody;
+            octave = 4;
+          }
+
+          const noteObj = activeMotif[motifStep % activeMotif.length];
+          if (noteObj) {
+            const pitch = getScaleNote(comp.root, comp.intervals, octave, noteObj.deg);
+            const vel = sectionName.startsWith("CHORUS") ? 0.85 : 0.72;
+            leadSynth.triggerAttackRelease(pitch, noteObj.dur, time, vel);
+          }
+        }
+
+        // --- B. HARMONY / ARPEGGIATOR ---
+        let arpDegree = null;
+        if (comp.arpStyle === "up16") {
+          arpDegree = chordDegrees[stepInBar % 4];
+        } else if (comp.arpStyle === "upDown16") {
+          const pattern = [0, 1, 2, 3, 2, 1, 2, 3];
+          arpDegree = chordDegrees[pattern[stepInBar % 8]];
+        } else if (comp.arpStyle === "offbeat8") {
+          if (stepInBar % 2 === 1) {
+            arpDegree = chordDegrees[((stepInBar - 1) / 2) % 3];
+          }
+        } else if (comp.arpStyle === "brokenTriad") {
+          if (stepInBar % 2 === 0) {
+            arpDegree = chordDegrees[(stepInBar / 2) % 4];
+          }
+        }
+
+        if (arpDegree !== null) {
+          const arpNote = getScaleNote(comp.root, comp.intervals, 4, arpDegree);
+          const arpVel = sectionName.startsWith("CHORUS") ? 0.55 : 0.4;
+          arpSynth.triggerAttackRelease(arpNote, "16n", time, arpVel);
+        }
+
+        // --- C. BASSLINE ---
+        let bassDeg = null;
+        let bassDur = "8n";
+        if (comp.bassStyle === "octaveBounce") {
+          if (stepInBar % 2 === 0) {
+            bassDeg = (stepInBar % 4 === 0) ? chordRoot : chordRoot + 7;
+            bassDur = "16n";
+          }
+        } else if (comp.bassStyle === "driving8") {
+          if (stepInBar % 2 === 0) {
+            bassDeg = (stepInBar === 14) ? chordRoot + 4 : chordRoot;
+            bassDur = "8n";
+          }
+        } else if (comp.bassStyle === "syncopated") {
+          const mask = [1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0];
+          if (mask[stepInBar]) {
+            bassDeg = (stepInBar === 10 || stepInBar === 13) ? chordRoot + 4 : chordRoot;
+            bassDur = "16n";
+          }
+        } else {
+          if (stepInBar === 0 || stepInBar === 6 || stepInBar === 8 || stepInBar === 12) {
+            bassDeg = (stepInBar === 8) ? chordRoot + 4 : chordRoot;
+            bassDur = "8n";
+          }
+        }
+
+        if (bassDeg !== null) {
+          const bassNote = getScaleNote(comp.root, comp.intervals, 2, bassDeg);
+          bassSynth.triggerAttackRelease(bassNote, bassDur, time, 0.85);
+        }
+
+        // --- D. CHIPTUNE PERCUSSION ---
+        if (sectionName !== "INTRO") {
+          let playKick = false;
+          let playSnare = false;
+          let playHat = false;
+
+          if (comp.drumStyle === "platformer") {
+            playKick = stepInBar === 0 || stepInBar === 6 || stepInBar === 8 || stepInBar === 14;
+            playSnare = stepInBar === 4 || stepInBar === 12;
+            playHat = stepInBar % 2 === 0;
+          } else if (comp.drumStyle === "fourOnFloor") {
+            playKick = stepInBar % 4 === 0;
+            playSnare = stepInBar === 4 || stepInBar === 12;
+            playHat = stepInBar % 2 === 1;
+          } else if (comp.drumStyle === "syncopated") {
+            playKick = stepInBar === 0 || stepInBar === 3 || stepInBar === 10;
+            playSnare = stepInBar === 4 || stepInBar === 12 || (stepInBar === 15 && sectionBar === 3);
+            playHat = stepInBar % 2 === 0 || stepInBar === 7;
+          } else {
+            playKick = stepInBar === 0 || stepInBar === 10;
+            playSnare = stepInBar === 8;
+            playHat = stepInBar % 4 === 2;
+          }
+
+          if (sectionName === "BRIDGE C") {
+            playKick = stepInBar === 0 || stepInBar === 8;
+            playSnare = stepInBar === 12;
+          }
+
+          if (playKick) {
+            kickSynth.triggerAttackRelease("C1", "16n", time, 0.9);
+          }
+          if (playSnare) {
+            snareSynth.triggerAttackRelease("16n", time, 0.72);
+          }
+          if (playHat) {
+            const hatVel = (stepInBar % 4 === 0) ? 0.45 : 0.25;
+            hatSynth.triggerAttackRelease("32n", time, hatVel);
+          }
+        }
+
+        stepCounter++;
+      }
+
+      // =========================================================================
+      // 6. TRANSPORT, 2-MINUTE LIFECYCLE & UI CONTROLS
+      // =========================================================================
+      function loadCompositionUI(comp) {
+        document.getElementById("track-title").textContent = comp.title;
+        document.getElementById("meta-scale").textContent = `${comp.root} ${comp.scaleName}`;
+        document.documentElement.style.setProperty("--accent", comp.palette.primary);
+        document.documentElement.style.setProperty("--accent-secondary", comp.palette.secondary);
+        document.documentElement.style.setProperty("--bg-dark", comp.palette.bg);
+      }
+
+      function startNewTrack(withQuickFade = false) {
+        const generateAndStart = () => {
+          currentComposition = createNewComposition(currentComposition);
+          stepCounter = 0;
+          trackElapsedSec = 0;
+          isRampingDown = false;
+
+          loadCompositionUI(currentComposition);
+          applySynthPresetAndTimbre();
+
+          if (audioInitialized) {
+            leadSynth.releaseAll();
+            arpSynth.releaseAll();
+            fadeBus.gain.cancelScheduledValues(Tone.now());
+            fadeBus.gain.setValueAtTime(0.01, Tone.now());
+            fadeBus.gain.rampTo(1.0, 0.75);
+          }
+        };
+
+        if (withQuickFade && audioInitialized && isPlaying) {
+          fadeBus.gain.cancelScheduledValues(Tone.now());
+          fadeBus.gain.rampTo(0.001, 0.3);
+          setTimeout(generateAndStart, 320);
+        } else {
+          generateAndStart();
+        }
+      }
+
+      async function togglePlayPause() {
+        if (!audioInitialized) {
+          await Tone.start();
+          initAudioEngine();
+          if (!currentComposition) {
+            currentComposition = createNewComposition(null);
+            loadCompositionUI(currentComposition);
+          }
+          applySynthPresetAndTimbre();
+        }
+
+        if (!isPlaying) {
+          if (Tone.context.state !== "running") {
+            await Tone.context.resume();
+          }
+          fadeBus.gain.cancelScheduledValues(Tone.now());
+          fadeBus.gain.rampTo(1.0, 0.25);
+          Tone.Transport.start();
+          isPlaying = true;
+          lastFrameTime = performance.now();
+          updateTransportUI();
+        } else {
+          fadeBus.gain.cancelScheduledValues(Tone.now());
+          fadeBus.gain.rampTo(0.001, 0.15);
+          setTimeout(() => {
+            if (!isPlaying) {
+              Tone.Transport.pause();
+              leadSynth.releaseAll();
+              arpSynth.releaseAll();
+            }
+          }, 160);
+          isPlaying = false;
+          updateTransportUI();
+        }
+      }
+
+      async function handleNextTrackClick() {
+        if (!audioInitialized) {
+          await Tone.start();
+          initAudioEngine();
+        }
+        startNewTrack(isPlaying);
+        if (!isPlaying) {
+          if (Tone.context.state !== "running") {
+            await Tone.context.resume();
+          }
+          Tone.Transport.start();
+          isPlaying = true;
+          lastFrameTime = performance.now();
+          updateTransportUI();
+        }
+      }
+
+      function togglePauseNextSong() {
+        pauseNextSong = !pauseNextSong;
+        const btn = document.getElementById("btn-pause-next");
+        const icon = document.getElementById("lock-icon");
+        const text = document.getElementById("lock-text");
+        const cycleLabel = document.getElementById("cycle-mode-label");
+
+        if (pauseNextSong) {
+          btn.classList.add("toggle-active");
+          icon.textContent = "🔒";
+          text.textContent = "Pause Next Song: On";
+          cycleLabel.textContent = "TRACK LOCKED · LOOPING";
+
+          if (isRampingDown && audioInitialized && isPlaying) {
+            isRampingDown = false;
+            fadeBus.gain.cancelScheduledValues(Tone.now());
+            fadeBus.gain.rampTo(1.0, 0.6);
+          }
+        } else {
+          btn.classList.remove("toggle-active");
+          icon.textContent = "🔓";
+          text.textContent = "Pause Next Song: Off";
+          cycleLabel.textContent = "AUTO-NEXT AT 02:00";
+        }
+      }
+
+      function toggleUI() {
+        const overlay = document.getElementById("ui-overlay");
+        overlay.classList.toggle("ui-hidden");
+        if (document.activeElement) {
+          document.activeElement.blur();
+        }
+      }
+
+      function updateTransportUI() {
+        const playIcon = document.getElementById("play-icon");
+        const playText = document.getElementById("play-text");
+        const dot = document.getElementById("status-dot");
+        const statusLabel = document.getElementById("status-label");
+
+        if (isPlaying) {
+          playIcon.textContent = "⏸";
+          playText.textContent = "Pause";
+          dot.classList.add("active");
+          statusLabel.textContent = isRampingDown
+            ? "RAMPING DOWN // NEXT TRACK SOON"
+            : "GENERATING // LIVE SYNTHESIS";
+        } else {
+          playIcon.textContent = "▶";
+          playText.textContent = "Play";
+          dot.classList.remove("active");
+          statusLabel.textContent = "PAUSED // STANDBY";
+        }
+      }
+
+      function formatTime(sec) {
+        const clamped = Math.max(0, Math.floor(sec));
+        const m = String(Math.floor(clamped / 60)).padStart(2, "0");
+        const s = String(clamped % 60).padStart(2, "0");
+        return `${m}:${s}`;
+      }
+
+      // =========================================================================
+      // 7. REACTIVE CANVAS VISUALIZER
+      // =========================================================================
+      const canvas = document.getElementById("visualizer-canvas");
+      const ctx = canvas.getContext("2d");
+      let width = 0;
+      let height = 0;
+      let pulseRadius = 0;
+      let gridOffset = 0;
+
+      const particles = Array.from({ length: 48 }, () => ({
+        x: Math.random(),
+        y: Math.random(),
+        size: randInt(2, 5),
+        speed: 0.0004 + Math.random() * 0.0012
+      }));
+
+      function resizeCanvas() {
+        const dpr = window.devicePixelRatio || 1;
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = width * dpr;
+        canvas.height = height * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      window.addEventListener("resize", resizeCanvas);
+      resizeCanvas();
+
+      function renderLoop(now) {
+        const dt = Math.min(0.1, (now - lastFrameTime) / 1000);
+        lastFrameTime = now;
+
+        // Track 2-Minute Timer & Fade-Out Ramp
+        if (isPlaying) {
+          trackElapsedSec += dt;
+
+          if (!pauseNextSong) {
+            if (trackElapsedSec >= TRACK_DURATION_SEC - FADE_OUT_DURATION_SEC && !isRampingDown) {
+              isRampingDown = true;
+              updateTransportUI();
+              if (audioInitialized) {
+                fadeBus.gain.cancelScheduledValues(Tone.now());
+                fadeBus.gain.rampTo(0.0005, FADE_OUT_DURATION_SEC - 0.15);
+              }
+            }
+
+            if (trackElapsedSec >= TRACK_DURATION_SEC) {
+              startNewTrack(false);
+              updateTransportUI();
+            }
+          } else if (trackElapsedSec >= TRACK_DURATION_SEC) {
+            trackElapsedSec %= TRACK_DURATION_SEC;
+          }
+
+          document.getElementById("time-elapsed").textContent = formatTime(trackElapsedSec);
+          const pct = Math.min(100, (trackElapsedSec / TRACK_DURATION_SEC) * 100);
+          document.getElementById("progress-fill").style.width = `${pct}%`;
+        }
+
+        // Read audio frequency & waveform data
+        let fftNorm = new Array(64).fill(0);
+        let waveData = new Float32Array(128);
+        let bassEnergy = 0;
+        let midEnergy = 0;
+
+        if (audioInitialized && isPlaying && fftAnalyser && waveAnalyser) {
+          const rawFft = fftAnalyser.getValue();
+          waveData = waveAnalyser.getValue();
+
+          for (let i = 0; i < 64; i++) {
+            const db = rawFft[i] ?? -100;
+            const norm = Math.max(0, Math.min(1, (db + 92) / 78));
+            fftNorm[i] = norm;
+            if (i < 8) bassEnergy += norm;
+            else if (i < 28) midEnergy += norm;
+          }
+          bassEnergy /= 8;
+          midEnergy /= 20;
+        } else {
+          const t = now * 0.002;
+          for (let i = 0; i < 64; i++) {
+            fftNorm[i] = 0.04 + 0.03 * Math.sin(t + i * 0.25);
+          }
+          bassEnergy = 0.06 + 0.03 * Math.sin(t);
+        }
+
+        const primary = currentComposition ? currentComposition.palette.primary : "#00f5d4";
+        const secondary = currentComposition ? currentComposition.palette.secondary : "#ff2a85";
+        const bgColor = currentComposition ? currentComposition.palette.bg : "#070913";
+
+        // 1. Clear Background
+        ctx.fillStyle = bgColor;
+        ctx.fillRect(0, 0, width, height);
+
+        // 2. Retro Perspective Horizon Grid
+        gridOffset = (gridOffset + dt * (28 + bassEnergy * 140)) % 40;
+        const horizonY = height * 0.53;
+
+        ctx.save();
+        ctx.strokeStyle = primary;
+        ctx.globalAlpha = 0.11 + bassEnergy * 0.14;
+        ctx.lineWidth = 1;
+
+        for (let i = 0; i < 12; i++) {
+          const progress = (i * 40 + gridOffset) / 480;
+          const y = horizonY + Math.pow(progress, 1.8) * (height - horizonY);
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(width, y);
+          ctx.stroke();
+        }
+
+        const centerX = width * 0.5;
+        for (let i = -10; i <= 10; i++) {
+          ctx.beginPath();
+          ctx.moveTo(centerX + i * 28, horizonY);
+          ctx.lineTo(centerX + i * 150, height);
+          ctx.stroke();
+        }
+        ctx.restore();
+
+        // 3. Floating Pixel Particles
+        ctx.save();
+        for (let i = 0; i < particles.length; i++) {
+          const p = particles[i];
+          p.y -= p.speed * (1 + bassEnergy * 5);
+          if (p.y < -0.02) {
+            p.y = 1.02;
+            p.x = Math.random();
+          }
+          ctx.fillStyle = i % 2 === 0 ? primary : secondary;
+          ctx.globalAlpha = 0.22 + midEnergy * 0.45;
+          const px = Math.floor(p.x * width);
+          const py = Math.floor(p.y * height);
+          ctx.fillRect(px, py, p.size, p.size);
+        }
+        ctx.restore();
+
+        // 4. Central Reactive Geometric Emblem
+        const targetRadius = Math.min(width, height) * (0.11 + bassEnergy * 0.14);
+        pulseRadius += (targetRadius - pulseRadius) * 0.22;
+
+        ctx.save();
+        ctx.translate(centerX, horizonY - 20);
+        ctx.rotate(now * 0.0004);
+        ctx.strokeStyle = secondary;
+        ctx.lineWidth = 2.5;
+        ctx.globalAlpha = 0.35 + bassEnergy * 0.45;
+
+        ctx.beginPath();
+        ctx.moveTo(0, -pulseRadius * 1.25);
+        ctx.lineTo(pulseRadius * 1.25, 0);
+        ctx.lineTo(0, pulseRadius * 1.25);
+        ctx.lineTo(-pulseRadius * 1.25, 0);
+        ctx.closePath();
+        ctx.stroke();
+
+        ctx.rotate(-now * 0.0009);
+        ctx.strokeStyle = primary;
+        ctx.strokeRect(-pulseRadius * 0.72, -pulseRadius * 0.72, pulseRadius * 1.44, pulseRadius * 1.44);
+        ctx.restore();
+
+        // 5. Pixel-Segmented Frequency Spectrum Bars
+        const barCount = 48;
+        const totalBarWidth = Math.min(width * 0.86, 980);
+        const startX = (width - totalBarWidth) * 0.5;
+        const barSlot = totalBarWidth / barCount;
+        const barWidth = Math.max(4, barSlot * 0.72);
+        const maxBarHeight = height * 0.31;
+        const segmentHeight = 6;
+        const segmentGap = 3;
+
+        for (let i = 0; i < barCount; i++) {
+          const distFromCenter = Math.abs(i - (barCount - 1) / 2) / ((barCount - 1) / 2);
+          const binIndex = Math.min(63, Math.floor(distFromCenter * 44));
+          const mag = fftNorm[binIndex];
+          const barH = mag * maxBarHeight;
+
+          const x = startX + i * barSlot + (barSlot - barWidth) * 0.5;
+          const segments = Math.floor(barH / (segmentHeight + segmentGap));
+
+          for (let s = 0; s < segments; s++) {
+            const y = horizonY - (s + 1) * (segmentHeight + segmentGap);
+            const ratio = s / Math.max(1, maxBarHeight / (segmentHeight + segmentGap));
+            ctx.fillStyle = ratio > 0.65 ? secondary : primary;
+            ctx.globalAlpha = 0.85;
+            ctx.fillRect(x, y, barWidth, segmentHeight);
+          }
+        }
+
+        // 6. Oscilloscope Waveform Ribbon
+        ctx.save();
+        ctx.beginPath();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.65;
+        const waveWidth = totalBarWidth;
+        for (let i = 0; i < waveData.length; i++) {
+          const wx = startX + (i / (waveData.length - 1)) * waveWidth;
+          const wy = horizonY + 24 + waveData[i] * 70;
+          if (i === 0) ctx.moveTo(wx, wy);
+          else ctx.lineTo(wx, wy);
+        }
+        ctx.stroke();
+        ctx.restore();
+
+        requestAnimationFrame(renderLoop);
+      }
+
+      // =========================================================================
+      // 8. EVENT LISTENERS & INITIALIZATION
+      // =========================================================================
+      document.getElementById("btn-play-pause").addEventListener("click", togglePlayPause);
+      document.getElementById("btn-next").addEventListener("click", handleNextTrackClick);
+      document.getElementById("btn-pause-next").addEventListener("click", togglePauseNextSong);
+      document.getElementById("btn-hide-ui").addEventListener("click", toggleUI);
+      document.getElementById("btn-reset-mix").addEventListener("click", resetMixerLevels);
+
+      // Instrument EQ volume sliders
+      ["lead", "arp", "bass", "drums"].forEach((ch) => {
+        const slider = document.getElementById(`vol-${ch}`);
+        slider.addEventListener("input", (e) => {
+          setChannelLevel(ch, Number(e.target.value));
+        });
+      });
+
+      // Master volume slider
+      document.getElementById("vol-master").addEventListener("input", (e) => {
+        setMasterLevel(Number(e.target.value));
+      });
+
+      document.getElementById("synth-preset").addEventListener("change", (e) => {
+        selectedPresetKey = e.target.value;
+        applySynthPresetAndTimbre();
+        e.target.blur();
+      });
+
+      document.getElementById("mood-slider").addEventListener("input", (e) => {
+        moodValue = Number(e.target.value);
+        applyMoodAndTempo(true);
+      });
+
+      window.addEventListener("keydown", (e) => {
+        if (e.key === "h" || e.key === "H") {
+          toggleUI();
+        }
+      });
+
+      // Initialize first track metadata & start render loop
+      currentComposition = createNewComposition(null);
+      loadCompositionUI(currentComposition);
+      applySynthPresetAndTimbre();
+      requestAnimationFrame(renderLoop);
+    })();
+  </script>
+</body>
+</html>
